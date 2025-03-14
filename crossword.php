@@ -2,8 +2,8 @@
 header("Content-Type: text/html");
 
 // Grid configuration
-define("GRID_SIZE", 20); // Maximum crossword size
-define("CELL_SIZE", 1); // cm size per cell
+define("GRID_SIZE", 20);
+define("CELL_SIZE", 1);
 define("MAX_WORDS", 14);
 define("MIN_WORDS", 2);
 
@@ -14,20 +14,26 @@ if (!isset($_GET['questionType']) || !is_numeric($_GET['questionType'])) {
 $questionType = (int) $_GET['questionType'];
 $numWords = isset($_GET['numWords']) && is_numeric($_GET['numWords']) ? max(MIN_WORDS, min(MAX_WORDS, (int)$_GET['numWords'])) : 10;
 
-// Fetch words from database
+// Fetch words and clues from database
 $mysqli = new mysqli("localhost", "bingo_user", "securepassword", "bingo");
 if ($mysqli->connect_error) {
     die("Database connection failed.");
 }
 
-$stmt = $mysqli->prepare("SELECT answer_string FROM clues WHERE question_type = ? ORDER BY CHAR_LENGTH(answer_string) DESC LIMIT ?");
+$stmt = $mysqli->prepare("SELECT clue_string, answer_string FROM clues WHERE question_type = ? ORDER BY RAND() LIMIT ?");
 $stmt->bind_param("ii", $questionType, $numWords);
 $stmt->execute();
 $result = $stmt->get_result();
 
+$clues = [];
 $words = [];
+
 while ($row = $result->fetch_assoc()) {
-    $words[] = strtoupper(str_replace(" ", "", $row['answer_string'])); // Remove spaces for crossword
+    $clue = $row['clue_string'];
+    $answer = strtoupper(str_replace(" ", "", $row['answer_string'])); // Remove spaces
+
+    $clues[] = ['clue' => $clue, 'answer' => $answer];
+    $words[] = $answer;
 }
 
 $stmt->close();
@@ -37,7 +43,10 @@ if (count($words) < 2) {
     die("Not enough words to generate crossword.");
 }
 
-// Initialize empty grid
+// Shuffle words to get different layouts each reload
+shuffle($clues);
+
+// Initialize grid
 $grid = array_fill(0, GRID_SIZE, array_fill(0, GRID_SIZE, null));
 $placedWords = [];
 
@@ -51,16 +60,33 @@ function canPlaceWord($grid, $word, $row, $col, $across) {
         if ($row + $length > GRID_SIZE) return false;
     }
 
+    $hasIntersection = false;
+
     for ($i = 0; $i < $length; $i++) {
         $r = $across ? $row : $row + $i;
         $c = $across ? $col + $i : $col;
 
-        if ($grid[$r][$c] !== null && $grid[$r][$c] !== $word[$i]) {
+        // Reject if occupied by a different letter
+        if ($grid[$r][$c] !== null && $grid[$r][$c]['letter'] !== $word[$i]) {
             return false;
+        }
+
+        // Ensure crossing happens (if grid is not empty)
+        if ($grid[$r][$c] !== null && $grid[$r][$c]['letter'] === $word[$i]) {
+            $hasIntersection = true;
+        }
+
+        // Prevent parallel adjacent words (left/right for across, top/bottom for down)
+        if ($across) {
+            if ($r > 0 && $grid[$r-1][$c] !== null) return false;
+            if ($r < GRID_SIZE-1 && $grid[$r+1][$c] !== null) return false;
+        } else {
+            if ($c > 0 && $grid[$r][$c-1] !== null) return false;
+            if ($c < GRID_SIZE-1 && $grid[$r][$c+1] !== null) return false;
         }
     }
 
-    return true;
+    return $hasIntersection;
 }
 
 // Function to place a word on the grid
@@ -69,22 +95,25 @@ function placeWord(&$grid, $word, $row, $col, $across) {
     for ($i = 0; $i < $length; $i++) {
         $r = $across ? $row : $row + $i;
         $c = $across ? $col + $i : $col;
-        $grid[$r][$c] = $word[$i];
+        $grid[$r][$c] = ['letter' => $word[$i], 'visible' => false]; // Hide by default
     }
 }
 
-// Place first word in the center
-$firstWord = array_shift($words);
-$startRow = GRID_SIZE / 2;
-$startCol = (GRID_SIZE - strlen($firstWord)) / 2;
-placeWord($grid, $firstWord, $startRow, $startCol, true);
-$placedWords[] = [$firstWord, $startRow, $startCol, true];
+// Place first word in the center (random orientation)
+$firstEntry = array_shift($clues);
+$firstWord = $firstEntry['answer'];
+$startRow = rand(5, GRID_SIZE - 10);
+$startCol = rand(5, GRID_SIZE - strlen($firstWord) - 5);
+$firstAcross = rand(0, 1) === 1;
+placeWord($grid, $firstWord, $startRow, $startCol, $firstAcross);
+$placedWords[] = [$firstEntry['clue'], $firstWord, $startRow, $startCol, $firstAcross];
 
-// Place remaining words with intersections
-foreach ($words as $word) {
+// Place remaining words
+foreach ($clues as $entry) {
+    $word = $entry['answer'];
     $placed = false;
 
-    foreach ($placedWords as [$existingWord, $erow, $ecol, $eacross]) {
+    foreach ($placedWords as [$existingClue, $existingWord, $erow, $ecol, $eacross]) {
         for ($i = 0; $i < strlen($word); $i++) {
             for ($j = 0; $j < strlen($existingWord); $j++) {
                 if ($word[$i] === $existingWord[$j]) {
@@ -94,7 +123,7 @@ foreach ($words as $word) {
 
                     if (canPlaceWord($grid, $word, $newRow, $newCol, $newAcross)) {
                         placeWord($grid, $word, $newRow, $newCol, $newAcross);
-                        $placedWords[] = [$word, $newRow, $newCol, $newAcross];
+                        $placedWords[] = [$entry['clue'], $word, $newRow, $newCol, $newAcross];
                         $placed = true;
                         break 3;
                     }
@@ -110,12 +139,11 @@ foreach ($words as $word) {
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Crossword Generator</title>
     <style>
         body { font-family: Arial, sans-serif; text-align: center; }
         .grid-container { display: grid; grid-template-columns: repeat(<?= GRID_SIZE ?>, <?= CELL_SIZE ?>cm); width: <?= GRID_SIZE ?>cm; margin: auto; }
-        .cell { width: <?= CELL_SIZE ?>cm; height: <?= CELL_SIZE ?>cm; border: 1px solid black; display: flex; justify-content: center; align-items: center; font-size: 16px; font-weight: bold; }
+        .cell { width: <?= CELL_SIZE ?>cm; height: <?= CELL_SIZE ?>cm; border: 1px solid black; display: flex; justify-content: center; align-items: center; font-size: 16px; font-weight: bold; background-color: white; }
         .black-cell { background-color: black; }
     </style>
 </head>
@@ -123,25 +151,16 @@ foreach ($words as $word) {
 
 <h1>Crossword Generator</h1>
 
-<form method="GET" action="crossword.php">
-    <input type="hidden" name="questionType" value="<?= $questionType ?>">
-    <label for="numWords">Number of Words:</label>
-    <select name="numWords" id="numWords" onchange="this.form.submit()">
-        <?php for ($i = MIN_WORDS; $i <= MAX_WORDS; $i++): ?>
-            <option value="<?= $i ?>" <?= $i == $numWords ? 'selected' : '' ?>><?= $i ?></option>
-        <?php endfor; ?>
-    </select>
-</form>
-
 <div class="grid-container">
     <?php
     for ($r = 0; $r < GRID_SIZE; $r++) {
         for ($c = 0; $c < GRID_SIZE; $c++) {
-            $char = $grid[$r][$c];
-            if ($char !== null) {
-                echo "<div class='cell'>$char</div>";
-            } else {
+            $cell = $grid[$r][$c];
+
+            if ($cell === null) {
                 echo "<div class='cell black-cell'></div>";
+            } else {
+                echo "<div class='cell' data-letter='{$cell['letter']}' onclick='this.innerHTML=this.getAttribute(\"data-letter\")'>&nbsp;</div>";
             }
         }
     }
@@ -149,40 +168,21 @@ foreach ($words as $word) {
 </div>
 
 <h2>Clues</h2>
-<table>
-    <tr>
-        <th>Across</th>
-        <th>Down</th>
-    </tr>
-    <tr>
-        <td>
-            <ul>
-                <?php foreach ($placedWords as [$word, $row, $col, $across]) {
-                    if ($across) echo "<li>$word</li>";
-                } ?>
-            </ul>
-        </td>
-        <td>
-            <ul>
-                <?php foreach ($placedWords as [$word, $row, $col, $across]) {
-                    if (!$across) echo "<li>$word</li>";
-                } ?>
-            </ul>
-        </td>
-    </tr>
-</table>
+<ul>
+    <?php foreach ($placedWords as [$clue, $word]) {
+        echo "<li>$clue</li>";
+    } ?>
+</ul>
 
 <button onclick="location.reload()">Randomise</button>
 <button onclick="window.print()">Print</button>
-<button onclick="window.location.href='index.php'">Choose Different Set</button>
 <button onclick="showSolution()">Show Solution</button>
 
 <script>
     function showSolution() {
-        const cells = document.querySelectorAll(".cell");
-        cells.forEach(cell => {
+        document.querySelectorAll(".cell").forEach(cell => {
             if (cell.classList.contains("black-cell")) return;
-            cell.style.color = "black";
+            cell.innerHTML = cell.getAttribute("data-letter");
         });
     }
 </script>
