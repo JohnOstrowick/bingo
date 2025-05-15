@@ -51,36 +51,29 @@ $questionType = (int) $_GET['questionType'];
         }
 
         function generateNumberBingoCard() {
-			let columns = [];
-			for (let c = 0; c < 5; c++) {
-				let colSet = new Set();
-				let min = c * 20 + 1;
-				let max = c * 20 + 19;
-				while (colSet.size < 5) {
-					colSet.add(Math.floor(Math.random() * (max - min + 1)) + min);
-				}
-				columns.push([...colSet]);
-			}
+            let numbers = new Set();
+            while (numbers.size < 24) {
+                numbers.add(Math.floor(Math.random() * 100)); // Random numbers [0,99]
+            }
+            let numberArray = [...numbers];
+            numberArray.splice(12, 0, "FREE SPACE"); // Insert free space
 
-			columns[2][2] = "FREE SPACE";
+            let bingoHTML = `<tr bgcolor="lightgrey">
+                <td>B</td><td>I</td><td>N</td><td>G</td><td>O</td>
+            </tr>`;
 
-			let bingoHTML = `<tr bgcolor="lightgrey">
-				<td>B</td><td>I</td><td>N</td><td>G</td><td>O</td>
-			</tr>`;
+            for (let i = 0; i < 5; i++) {
+                bingoHTML += "<tr>";
+                for (let j = 0; j < 5; j++) {
+                    let num = numberArray[i * 5 + j];
+                    let extraClass = num === "FREE SPACE" ? "free-space" : "";
+                    bingoHTML += `<td class="${extraClass}">${num}</td>`;
+                }
+                bingoHTML += "</tr>";
+            }
 
-			for (let row = 0; row < 5; row++) {
-				bingoHTML += "<tr>";
-				for (let col = 0; col < 5; col++) {
-					let num = columns[col][row];
-					let extraClass = num === "FREE SPACE" ? "free-space" : "";
-					bingoHTML += `<td class="${extraClass}">${num}</td>`;
-				}
-				bingoHTML += "</tr>";
-			}
-
-			document.getElementById("bingo-table").innerHTML = bingoHTML;
-		}
-
+            document.getElementById("bingo-table").innerHTML = bingoHTML;
+        }
 
         function generateBingoCard(answers) {
             // Dynamically adjust font size if length exceeds 10 characters
