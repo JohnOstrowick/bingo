@@ -23,7 +23,7 @@ $questionType = (int) $_GET['questionType'];
 </head>
 <body>
 
-    <h1>Bingo Card Generator</h1>
+    <h1>Bingo Card Generator v2</h1>
     
     <button onclick="printBingoCard()">Print Bingo Card</button>
 	<button onclick="printClues(false)">Print Clues</button>
