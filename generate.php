@@ -196,6 +196,10 @@ $questionType = (int) $_GET['questionType'];
         }
 
         function printClues(withAnswers) {
+	    if (questionType === 8) {
+	        window.open("numeric_clues.html", "_blank");
+	        return;
+		}
             fetch(`get_clues.php?questionType=${questionType}`)
                 .then(response => response.json())
                 .then(data => {
